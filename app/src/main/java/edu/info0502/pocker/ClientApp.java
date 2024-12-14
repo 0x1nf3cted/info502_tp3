@@ -47,6 +47,7 @@ public class ClientApp {
         try (BufferedReader userInput = new BufferedReader(new InputStreamReader(System.in))) {
             String input;
             while ((input = userInput.readLine()) != null) {
+                System.out.println("Votre commande: " + input);
                 out.println(input);
                 if (input.equalsIgnoreCase("QUIT")) {
                     break;
