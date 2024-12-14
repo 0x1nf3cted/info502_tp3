@@ -2,62 +2,97 @@ package edu.info0502.pocker;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 public class PokerHoldem {
 
     private Talon talon;
     private List<Joueur> joueurs;
-    private CartesCommunautaires cartesCommunautaires;
+    private CartesCommunes cartesCommunes;
 
-    public PokerHoldem(int nombreDeJoueurs) {
-        talon = new Talon(1);
-        talon.melanger();
-
-        // créer les joueurs et distribuer les cartes privées
-        joueurs = new ArrayList<>();
-        for (int i = 0; i < nombreDeJoueurs; i++) {
-            Joueur joueur = new Joueur("Joueur " + (i + 1));
-            joueur.recevoirCartesPrivees(talon.tirerCarte(), talon.tirerCarte());
-            joueurs.add(joueur);
+    public PokerHoldem(List<String> nomsJoueurs) {
+        if (nomsJoueurs.size() < 2 || nomsJoueurs.size() > 10) {
+            throw new IllegalArgumentException("Le Texas Hold'em nécessite 2 à 10 joueurs");
         }
 
-        // initialiser les cartes "community cards"
-        cartesCommunautaires = new CartesCommunautaires();
-        for (int i = 0; i < 5; i++) {
-            cartesCommunautaires.ajouterCarte(talon.tirerCarte());
+        talon = new Talon(1);
+        joueurs = new ArrayList<>();
+        cartesCommunes = new CartesCommunes();
+
+        // Initialiser les joueurs
+        for (String nom : nomsJoueurs) {
+            joueurs.add(new Joueur(nom));
         }
     }
 
     public void demarrerPartie() {
-        System.out.println("~~~ Début de la partie de Texas Hold'em ~~~");
-        cartesCommunautaires.afficher();
-
-        // évaluer et afficher la meilleure main de chaque joueur
-        for (Joueur joueur : joueurs) {
-            joueur.evaluerMeilleureMain(cartesCommunautaires);
-            joueur.afficherMain();
-        }
-
-        // déterminer le gagnant
-        determinerGagnant();
+        talon.melanger();
+        cartesCommunes.reinitialiser();
+        distribuerCartesPrivees();
     }
 
-    private void determinerGagnant() {
-        Joueur gagnant = joueurs.get(0);
+    private void distribuerCartesPrivees() {
+        for (Joueur joueur : joueurs) {
+            Carte carte1 = talon.tirerCarte();
+            Carte carte2 = talon.tirerCarte();
+            joueur.recevoirCartesPrivees(carte1, carte2);
+        }
+    }
+
+    public void distribuerFlop() {
+        for (int i = 0; i < 3; i++) {
+            cartesCommunes.ajouterCarte(talon.tirerCarte());
+        }
+    }
+
+    public void distribuerTurn() {
+        cartesCommunes.ajouterCarte(talon.tirerCarte());
+    }
+
+    public void distribuerRiver() {
+        cartesCommunes.ajouterCarte(talon.tirerCarte());
+    }
+
+    public Map<String, String> calculerResultats() {
+        Map<String, String> results = new HashMap<>();
+        for (Joueur joueur : joueurs) {
+            joueur.evaluerMeilleureMain(cartesCommunes);
+            String mainInfo = joueur.getMeilleureMain().evaluerMain().toString();
+            results.put(joueur.getNom(), mainInfo);
+        }
+        return results;
+    }
+
+    public String determinerGagnant() {
+        Joueur gagnant = null;
+        Main meilleurMain = null;
 
         for (Joueur joueur : joueurs) {
-            if (joueur.getMeilleureMain().comparerAvec(gagnant.getMeilleureMain()) > 0) {
+            joueur.evaluerMeilleureMain(cartesCommunes);
+            Main mainActuelle = joueur.getMeilleureMain();
+
+            if (meilleurMain == null || mainActuelle.comparerAvec(meilleurMain) > 0) {
+                meilleurMain = mainActuelle;
                 gagnant = joueur;
             }
         }
 
-        System.out.println("Le gagnant est " + gagnant.getNom() + " avec la combinaison: " + gagnant.getMeilleureMain().evaluerMain());
+        return gagnant != null ? gagnant.getNom() + " gagne avec " + meilleurMain.evaluerMain() : null;
     }
 
-    public static void main(String[] args) {
-        PokerHoldem jeu = new PokerHoldem(4);
-        jeu.demarrerPartie();
+    public List<Carte> getCartesCommunes() {
+        return cartesCommunes.getCartes();
+    }
+
+    public Joueur getJoueurParNom(String nom) {
+        for (Joueur joueur : joueurs) {
+            if (joueur.getNom().equals(nom)) {
+                return joueur;
+            }
+        }
+        return null;
     }
 }
 
@@ -73,23 +108,21 @@ class Joueur {
     }
 
     public void recevoirCartesPrivees(Carte carte1, Carte carte2) {
+        cartesPrivees.clear();
         cartesPrivees.add(carte1);
         cartesPrivees.add(carte2);
     }
 
-    public void evaluerMeilleureMain(CartesCommunautaires cartesCommunautaires) {
+    public void evaluerMeilleureMain(CartesCommunes cartesCommunes) {
         List<Carte> toutesLesCartes = new ArrayList<>(cartesPrivees);
-        toutesLesCartes.addAll(cartesCommunautaires.getCartes());
-
-        // trouver la meilleure combinaison de 5 cartes parmi les 7 disponibles
+        toutesLesCartes.addAll(cartesCommunes.getCartes());
         meilleureMain = trouverMeilleureCombinaison(toutesLesCartes);
     }
 
     private Main trouverMeilleureCombinaison(List<Carte> toutesLesCartes) {
         Main meilleureCombinaison = null;
-
-        // générer les combinaisons de 5 cartes parmi les 7 disponibles
         List<List<Carte>> combinaisons = genererCombinaisons(toutesLesCartes, 5);
+
         for (List<Carte> combinaison : combinaisons) {
             Main main = new Main();
             for (Carte carte : combinaison) {
@@ -101,7 +134,7 @@ class Joueur {
             }
         }
 
-        return meilleureCombinaison; // en utilisant les fonctions de Main
+        return meilleureCombinaison;
     }
 
     private List<List<Carte>> genererCombinaisons(List<Carte> cartes, int taille) {
@@ -110,21 +143,26 @@ class Joueur {
         return combinaisons;
     }
 
-    private void genererCombinaisonsHelper(List<Carte> cartes, int taille, int debut, List<Carte> current, List<List<Carte>> resultat) {
-        if (current.size() == taille) {
-            resultat.add(new ArrayList<>(current));
+    private void genererCombinaisonsHelper(List<Carte> cartes, int taille, int debut,
+            List<Carte> actuelle, List<List<Carte>> resultat) {
+        if (actuelle.size() == taille) {
+            resultat.add(new ArrayList<>(actuelle));
             return;
         }
 
         for (int i = debut; i < cartes.size(); i++) {
-            current.add(cartes.get(i));
-            genererCombinaisonsHelper(cartes, taille, i + 1, current, resultat);
-            current.remove(current.size() - 1);
+            actuelle.add(cartes.get(i));
+            genererCombinaisonsHelper(cartes, taille, i + 1, actuelle, resultat);
+            actuelle.remove(actuelle.size() - 1);
         }
     }
 
     public String getNom() {
         return nom;
+    }
+
+    public List<Carte> getCartesPrivees() {
+        return Collections.unmodifiableList(cartesPrivees);
     }
 
     public Main getMeilleureMain() {
@@ -137,29 +175,29 @@ class Joueur {
         System.out.println("Combinaison: " + meilleureMain.evaluerMain());
         System.out.println();
     }
+
 }
 
-class CartesCommunautaires {
+class CartesCommunes {
 
     private List<Carte> cartes;
 
-    public CartesCommunautaires() {
+    public CartesCommunes() {
         cartes = new ArrayList<>();
     }
 
     public void ajouterCarte(Carte carte) {
-        if (cartes.size() < 5) {
-            cartes.add(carte);
-        } else {
-            throw new IllegalStateException("Les cartes de la communauté sont déjà complètes");
+        if (cartes.size() >= 5) {
+            throw new IllegalStateException("Trop de cartes communes");
         }
+        cartes.add(carte);
+    }
+
+    public void reinitialiser() {
+        cartes.clear();
     }
 
     public List<Carte> getCartes() {
-        return cartes;
-    }
-
-    public void afficher() {
-        System.out.println("Cartes de la communauté: " + cartes);
+        return Collections.unmodifiableList(cartes);
     }
 }

@@ -1,303 +1,191 @@
 package edu.info0502.pocker;
 
-import java.io.*;
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.PrintWriter;
 import java.net.ServerSocket;
 import java.net.Socket;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 public class ServerApp {
-public static void main(String[] args) {
-    Scanner scanner = new Scanner(System.in);
-    System.out.println("=== Poker Server Setup ===");
-    
-    // Default values
-    int port = 12345;
-    int maxPlayers = 6;
-    
-    try {
 
-        // Start the server
-        System.out.println("\nStarting server...");
-        Server server = new Server(port, maxPlayers);
-        System.out.println("Server is running on port " + port);
-        System.out.println("Maximum players: " + maxPlayers);
-        server.start();
-        
-    } catch (Exception e) {
-        System.err.println("Failed to start server: " + e.getMessage());
-        System.exit(1);
-    } finally {
-        scanner.close();
+    private static final int PORT = 8888;
+    private final Map<String, ClientHandler> clients = new ConcurrentHashMap<>();
+    private PokerHoldem currentGame;
+    private boolean gameInProgress = false;
+
+    public void start() {
+        try (ServerSocket serverSocket = new ServerSocket(PORT)) {
+            System.out.println("Serveur de poker démarré sur le port " + PORT);
+
+            while (true) {
+                Socket clientSocket = serverSocket.accept();
+                ClientHandler handler = new ClientHandler(clientSocket, this);
+                new Thread(handler).start();
+            }
+        } catch (IOException e) {
+            System.err.println("Erreur du serveur: " + e.getMessage());
+        }
     }
-}
-    private static class Server {
-        private final Map<String, Main> playerHands = new ConcurrentHashMap<>();
-        private final int port;
-        private final int maxPlayers;
-        private final ServerSocket serverSocket;
-        private final ConcurrentHashMap<String, ClientHandler> clients;
-        private final ExecutorService clientThreadPool;
-        private Talon talon;
-        private final Main communityCards;
-        private boolean gameInProgress;
-        private int currentPlayerIndex;
-        private static final int MINIMUM_PLAYERS = 2;
 
-        public Server(int port, int maxPlayers) throws IOException {
-            this.port = port;
-            this.maxPlayers = maxPlayers;
-            this.serverSocket = new ServerSocket(port);
-            this.clients = new ConcurrentHashMap<>();
-            this.clientThreadPool = Executors.newFixedThreadPool(maxPlayers);
-            this.talon = new Talon(1); // Using 1 deck
-            this.communityCards = new Main();
-            this.gameInProgress = false;
-            this.currentPlayerIndex = 0;
+    public synchronized void startGame(String initiator) {
+        if (gameInProgress) {
+            sendMessageToPlayer(initiator, "Une partie est déjà en cours.");
+            return;
+        }
+        if (clients.size() < 2) {
+            sendMessageToPlayer(initiator, "Il faut au moins 2 joueurs pour commencer.");
+            return;
         }
 
-        public void start() {
-            System.out.println("Server started on port " + port);
-            
-            while (!serverSocket.isClosed()) {
-                try {
-                    Socket clientSocket = serverSocket.accept();
-                    handleNewClient(clientSocket);
-                } catch (IOException e) {
-                    System.err.println("Error accepting client connection: " + e.getMessage());
-                }
-            }
+        gameInProgress = true;
+        currentGame = new PokerHoldem(new ArrayList<>(clients.keySet()));
+        broadcastMessage("SYSTEM", "La partie commence !");
+        currentGame.demarrerPartie();
+
+        for (String player : clients.keySet()) {
+            Joueur joueur = currentGame.getJoueurParNom(player);
+            sendMessageToPlayer(player, "Vos cartes: " + joueur.getCartesPrivees());
+        }
+        distribuerFlop();
+    }
+
+    private void showMenu(String username) {
+        ClientHandler handler = clients.get(username);
+
+        StringBuilder menu = new StringBuilder();
+        menu.append("===== MENU =====\n");
+        menu.append("1. START - Démarrer une nouvelle partie (si vous êtes le premier joueur).\n");
+        menu.append("2. QUIT - Quitter la partie.\n");
+        menu.append("3. HELP - Afficher ce menu.\n");
+        menu.append("================\n");
+        if (handler != null) {
+            handler.sendMessage("PRIVÉ: " + menu.toString());
+        }
+    }
+
+    private void distribuerFlop() {
+        currentGame.distribuerFlop();
+        broadcastMessage("SYSTEM", "Flop: " + currentGame.getCartesCommunes());
+        distribuerTurn();
+    }
+
+    private void distribuerTurn() {
+        currentGame.distribuerTurn();
+        broadcastMessage("SYSTEM", "Turn: " + currentGame.getCartesCommunes());
+        distribuerRiver();
+    }
+
+    private void distribuerRiver() {
+        currentGame.distribuerRiver();
+        broadcastMessage("SYSTEM", "River: " + currentGame.getCartesCommunes());
+        showResults();
+    }
+
+    private void showResults() {
+        Map<String, String> results = currentGame.calculerResultats();
+        for (Map.Entry<String, String> entry : results.entrySet()) {
+            broadcastMessage("SYSTEM", entry.getKey() + ": " + entry.getValue());
         }
 
-        private void handleNewClient(Socket clientSocket) {
-            if (clients.size() >= maxPlayers) {
-                try {
-                    ObjectOutputStream out = new ObjectOutputStream(clientSocket.getOutputStream());
-                    out.writeObject("Server is full. Please try again later.");
-                    clientSocket.close();
-                } catch (IOException e) {
-                    System.err.println("Error handling full server: " + e.getMessage());
-                }
-                return;
-            }
+        String winner = currentGame.determinerGagnant();
+        broadcastMessage("SYSTEM", "Le gagnant est: " + winner);
+        endGame();
+    }
 
-            ClientHandler clientHandler = new ClientHandler(clientSocket);
-            clientThreadPool.execute(clientHandler);
+    private void endGame() {
+        gameInProgress = false;
+        currentGame = null;
+        broadcastMessage("SYSTEM", "La partie est terminée.");
+    }
+
+    public void broadcastMessage(String sender, String message) {
+        for (ClientHandler handler : clients.values()) {
+            handler.sendMessage(sender + ": " + message);
+        }
+    }
+
+    public void sendMessageToPlayer(String username, String message) {
+        ClientHandler handler = clients.get(username);
+        if (handler != null) {
+            handler.sendMessage("PRIVÉ: " + message);
+        }
+    }
+
+    class ClientHandler implements Runnable {
+
+        private final Socket socket;
+        private final ServerApp server;
+        private PrintWriter out;
+        private BufferedReader in;
+        private String username;
+
+        public ClientHandler(Socket socket, ServerApp server) {
+            this.socket = socket;
+            this.server = server;
         }
 
-        private void startGame() {
-            if (clients.size() >= MINIMUM_PLAYERS && !gameInProgress) {
-                gameInProgress = true;
-                talon = new Talon(1); // Reset and shuffle deck
-                dealInitialCards();
-                dealCommunityCards();
-            }
-        }
-
-        private void dealInitialCards() {
-            // Deal 2 cards to each player
-            for (ClientHandler client : clients.values()) {
-                for (int i = 0; i < 2; i++) {
-                    try {
-                        Carte card = talon.tirerCarte();
-                        client.sendCard(card);
-                    } catch (IllegalStateException e) {
-                        System.err.println("Error dealing cards: " + e.getMessage());
-                        return;
-                    }
-                }
-            }
-        }
-
-        private void dealCommunityCards() {
-            // Deal 5 community cards
+        @Override
+        public void run() {
             try {
-                for (int i = 0; i < 5; i++) {
-                    communityCards.ajouterCarte(talon.tirerCarte());
-                }
-                broadcastCommunityCards(communityCards);
-            } catch (IllegalStateException e) {
-                System.err.println("Error dealing community cards: " + e.getMessage());
-            }
-        }
+                out = new PrintWriter(socket.getOutputStream(), true);
+                in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
 
-        private void broadcastCommunityCards(Main communityCards) {
-            for (ClientHandler client : clients.values()) {
-                client.sendCommunityCards(communityCards);
-            }
-        }
-
-        private void broadcastMessage(String message, String excludeNickname) {
-            for (Map.Entry<String, ClientHandler> entry : clients.entrySet()) {
-                if (!entry.getKey().equals(excludeNickname)) {
-                    entry.getValue().sendMessage(message);
-                }
-            }
-        }
-
-        private class ClientHandler implements Runnable {
-            private final Socket clientSocket;
-            private ObjectInputStream input;
-            private ObjectOutputStream output;
-            private String nickname;
-            private final Main playerHand;
-
-            public ClientHandler(Socket socket) {
-                this.clientSocket = socket;
-                this.playerHand = new Main();
-            }
-
-            @Override
-            public void run() {
-                try {
-                    setupStreams();
-                    handleNicknameRegistration();
-                    handleClientCommunication();
-                } catch (IOException | ClassNotFoundException e) {
-                    System.err.println("Error handling client: " + e.getMessage());
-                } finally {
-                    cleanup();
-                }
-            }
-
-            private void setupStreams() throws IOException {
-                output = new ObjectOutputStream(clientSocket.getOutputStream());
-                input = new ObjectInputStream(clientSocket.getInputStream());
-            }
-
-            private void handleNicknameRegistration() throws IOException, ClassNotFoundException {
-                nickname = (String) input.readObject();
-                
-                if (clients.containsKey(nickname)) {
-                    output.writeObject("NICKNAME_TAKEN");
-                    output.flush();
-                    throw new IOException("Nickname already taken");
-                }
-
-                output.writeObject("NICKNAME_ACCEPTED");
-                output.flush();
-                clients.put(nickname, this);
-                
-                broadcastMessage(nickname + " has joined the game!", nickname);
-                System.out.println(nickname + " connected");
-                
-                startGame();
-            }
-
-        private void handleClientCommunication() throws IOException, ClassNotFoundException {
-            while (!clientSocket.isClosed()) {
-                Object message = input.readObject();
-
-                if (message instanceof String) {
-                    String strMessage = (String) message;
-                    if ("QUIT".equalsIgnoreCase(strMessage)) {
+                while (username == null) {
+                    out.println("Entrez votre username:");
+                    username = in.readLine();
+                    if (server.clients.putIfAbsent(username, this) == null) {
+                        out.println("Bienvenue " + username);
+                        showMenu(username);
                         break;
                     }
-                    broadcastMessage(nickname + ": " + strMessage, nickname);
-                } else if (message instanceof Main) {
-                    Main finalHand = (Main) message;
-                    evaluateHand(finalHand);
-                    collectAndDetermineWinner(finalHand);
+                    out.println("Ce username est déjà pris. Essayez un autre.");
+                    username = null;
                 }
+
+                String input;
+                while ((input = in.readLine()) != null) {
+                    processCommand(input);
+                }
+            } catch (IOException e) {
+                System.err.println("Erreur avec le client " + username);
+            } finally {
+                server.clients.remove(username);
             }
         }
 
-        private synchronized void collectAndDetermineWinner(Main hand) {
-            // Store the hand with the nickname
-            playerHands.put(nickname, hand);
-
-            // Check if all players have submitted their hands
-            if (playerHands.size() == clients.size()) {
-                determineWinner();
-            }
-        }
-
-        private void determineWinner() {
-            // Evaluate all hands and determine the winner
-            String winner = null;
-            Main bestHand = null;
-            CombinaisonPoker bestCombination = null;
-
-            for (Map.Entry<String, Main> entry : playerHands.entrySet()) {
-                String player = entry.getKey();
-                Main hand = entry.getValue();
-                CombinaisonPoker combination = hand.evaluerMain();
-
-                System.out.println(player + " has " + combination.name() + ": " + hand);
-
-                if (bestCombination == null || combination.compareTo(bestCombination) > 0) {
-                    bestHand = hand;
-                    bestCombination = combination;
-                    winner = player;
-                }
-            }
-
-            // Announce the winner
-            broadcastMessage("The winner is " + winner + " with " + bestCombination.name() + "!", null);
-            playerHands.clear(); // Reset for next round
-        }
-
-
-            private void evaluateHand(Main finalHand) {
-                try {
-                    CombinaisonPoker combinaison = finalHand.evaluerMain();
-                    sendMessage("Your hand: " + finalHand.toString() + " - " + combinaison.name());
-                } catch (IllegalStateException e) {
-                    sendMessage("Invalid hand: " + e.getMessage());
-                }
-            }
-
-            public void sendCard(Carte card) {
-                try {
-                    if (card == null) {
-                        throw new IllegalArgumentException("Cannot send a null card");
+        private void processCommand(String command) {
+            switch (command.toUpperCase()) {
+                case "START":
+                    server.startGame(username);
+                    break;
+                case "QUIT":
+                    server.broadcastMessage("SYSTEM", "Le joueur " + username + " a quitté la partie");
+                    try {
+                        socket.close();
+                    } catch (IOException e) {
+                        System.err.println("Erreur lors de la fermeture de la connexion pour " + username);
                     }
-                    playerHand.ajouterCarte(card);
-                    output.writeObject(card);
-                    output.flush();
-                    System.out.println("Sent card to " + nickname + ": " + card);
-                } catch (IllegalArgumentException e) {
-                    System.err.println("Invalid card: " + e.getMessage());
-                } catch (IOException e) {
-                    System.err.println("Error sending card to " + nickname + ": " + e.getMessage());
-                    cleanup(); // Handle client disconnection
-                }
-            }
-
-
-            public void sendCommunityCards(Main communityCards) {
-                try {
-                    output.writeObject(communityCards);
-                    output.flush();
-                } catch (IOException e) {
-                    System.err.println("Error sending community cards to " + nickname + ": " + e.getMessage());
-                }
-            }
-
-            public void sendMessage(String message) {
-                try {
-                    output.writeObject(message);
-                    output.flush();
-                } catch (IOException e) {
-                    System.err.println("Error sending message to " + nickname + ": " + e.getMessage());
-                }
-            }
-
-            private void cleanup() {
-                try {
-                    if (nickname != null) {
-                        clients.remove(nickname);
-                        broadcastMessage(nickname + " has left the game!", nickname);
-                    }
-                    if (input != null) input.close();
-                    if (output != null) output.close();
-                    if (clientSocket != null) clientSocket.close();
-                } catch (IOException e) {
-                    System.err.println("Error during cleanup: " + e.getMessage());
-                }
+                    break;
+                case "HELP":
+                    showMenu(username);
+                    break;
+                default:
+                    sendMessage("Commande non reconnue.");
             }
         }
+
+        public void sendMessage(String message) {
+            if (out != null) {
+                out.println(message);
+            }
+        }
+    }
+
+    public static void main(String[] args) {
+        new ServerApp().start();
     }
 }
