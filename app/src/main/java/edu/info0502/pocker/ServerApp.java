@@ -50,22 +50,36 @@ public class ServerApp {
             Joueur joueur = currentGame.getJoueurParNom(player);
             sendMessageToPlayer(player, "Vos cartes: " + joueur.getCartesPrivees());
         }
-        dealFlop();
+        distribuerFlop();
     }
 
-    private void dealFlop() {
+    private void showMenu(String username) {
+        ClientHandler handler = clients.get(username);
+
+        StringBuilder menu = new StringBuilder();
+        menu.append("===== MENU =====\n");
+        menu.append("1. START - Démarrer une nouvelle partie (si vous êtes le premier joueur).\n");
+        menu.append("2. QUIT - Quitter la partie.\n");
+        menu.append("3. HELP - Afficher ce menu.\n");
+        menu.append("================\n");
+        if (handler != null) {
+            handler.sendMessage("PRIVÉ: " + menu.toString());
+        }
+    }
+
+    private void distribuerFlop() {
         currentGame.distribuerFlop();
         broadcastMessage("SYSTEM", "Flop: " + currentGame.getCartesCommunes());
-        dealTurn();
+        distribuerTurn();
     }
 
-    private void dealTurn() {
+    private void distribuerTurn() {
         currentGame.distribuerTurn();
         broadcastMessage("SYSTEM", "Turn: " + currentGame.getCartesCommunes());
-        dealRiver();
+        distribuerRiver();
     }
 
-    private void dealRiver() {
+    private void distribuerRiver() {
         currentGame.distribuerRiver();
         broadcastMessage("SYSTEM", "River: " + currentGame.getCartesCommunes());
         showResults();
@@ -94,19 +108,20 @@ public class ServerApp {
         }
     }
 
-    public void sendMessageToPlayer(String nickname, String message) {
-        ClientHandler handler = clients.get(nickname);
+    public void sendMessageToPlayer(String username, String message) {
+        ClientHandler handler = clients.get(username);
         if (handler != null) {
             handler.sendMessage("PRIVÉ: " + message);
         }
     }
 
     class ClientHandler implements Runnable {
+
         private final Socket socket;
         private final ServerApp server;
         private PrintWriter out;
         private BufferedReader in;
-        private String nickname;
+        private String username;
 
         public ClientHandler(Socket socket, ServerApp server) {
             this.socket = socket;
@@ -119,15 +134,16 @@ public class ServerApp {
                 out = new PrintWriter(socket.getOutputStream(), true);
                 in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
 
-                while (nickname == null) {
-                    out.println("Entrez votre nickname:");
-                    nickname = in.readLine();
-                    if (server.clients.putIfAbsent(nickname, this) == null) {
-                        out.println("Bienvenue " + nickname);
+                while (username == null) {
+                    out.println("Entrez votre username:");
+                    username = in.readLine();
+                    if (server.clients.putIfAbsent(username, this) == null) {
+                        out.println("Bienvenue " + username);
+                        showMenu(username);
                         break;
                     }
-                    out.println("Ce nickname est déjà pris. Essayez un autre.");
-                    nickname = null;
+                    out.println("Ce username est déjà pris. Essayez un autre.");
+                    username = null;
                 }
 
                 String input;
@@ -135,19 +151,30 @@ public class ServerApp {
                     processCommand(input);
                 }
             } catch (IOException e) {
-                System.err.println("Erreur avec le client " + nickname);
+                System.err.println("Erreur avec le client " + username);
             } finally {
-                server.clients.remove(nickname);
+                server.clients.remove(username);
             }
         }
 
         private void processCommand(String command) {
             switch (command.toUpperCase()) {
                 case "START":
-                    server.startGame(nickname);
+                    server.startGame(username);
+                    break;
+                case "QUIT":
+                    server.broadcastMessage("SYSTEM", "Le joueur " + username + " a quitté la partie");
+                    try {
+                        socket.close();
+                    } catch (IOException e) {
+                        System.err.println("Erreur lors de la fermeture de la connexion pour " + username);
+                    }
+                    break;
+                case "HELP":
+                    showMenu(username);
                     break;
                 default:
-                    out.println("Commande non reconnue.");
+                    sendMessage("Commande non reconnue.");
             }
         }
 

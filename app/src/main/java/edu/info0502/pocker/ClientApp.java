@@ -20,10 +20,10 @@ public class ClientApp {
             out = new PrintWriter(socket.getOutputStream(), true);
             in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
 
-            // Thread pour recevoir les messages du serveur
+            // un thread pour recevoir les messages du serveur
             new Thread(this::receiveMessages).start();
 
-            // Thread pour envoyer les commandes utilisateur
+            // envoyer les commande d'utilisateur
             handleUserInput();
 
         } catch (IOException e) {

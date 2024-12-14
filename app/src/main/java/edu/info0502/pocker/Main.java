@@ -1,9 +1,9 @@
 package edu.info0502.pocker;
 
+import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.io.Serializable;
 
 //  les combinaisons possibles au poker
 enum CombinaisonPoker {
@@ -50,10 +50,9 @@ class Main implements Serializable {
         cartes.add(carte);
     }
 
-    // New method to add multiple cards to the hand
     public void ajouterCartes(List<Carte> cartesToAdd) {
         for (Carte carte : cartesToAdd) {
-            ajouterCarte(carte); // Reuse ajouterCarte to ensure size constraints are respected
+            ajouterCarte(carte);
         }
     }
 
