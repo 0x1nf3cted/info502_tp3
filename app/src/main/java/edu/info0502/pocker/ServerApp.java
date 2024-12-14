@@ -160,6 +160,7 @@ public class ServerApp {
         private void processCommand(String command) {
             switch (command.toUpperCase()) {
                 case "START":
+                    server.broadcastMessage("JOUEUR", "Le joueur " + username + " a initié la partie");
                     server.startGame(username);
                     break;
                 case "QUIT":
