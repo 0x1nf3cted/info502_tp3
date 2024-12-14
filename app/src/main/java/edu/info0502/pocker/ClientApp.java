@@ -8,7 +8,7 @@ import java.net.Socket;
 
 public class ClientApp {
 
-    private static final String SERVER_ADDRESS = "localhost";
+    private static final String SERVER_ADDRESS = "10.11.18.72";
     private static final int SERVER_PORT = 8888;
     private PrintWriter out;
     private BufferedReader in;
@@ -47,6 +47,7 @@ public class ClientApp {
         try (BufferedReader userInput = new BufferedReader(new InputStreamReader(System.in))) {
             String input;
             while ((input = userInput.readLine()) != null) {
+                System.out.println("Votre commande: " + input);
                 out.println(input);
                 if (input.equalsIgnoreCase("QUIT")) {
                     break;
