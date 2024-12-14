@@ -8,7 +8,7 @@ import java.net.Socket;
 
 public class ClientApp {
 
-    private static final String SERVER_ADDRESS = "localhost";
+    private static final String SERVER_ADDRESS = "10.11.18.72";
     private static final int SERVER_PORT = 8888;
     private PrintWriter out;
     private BufferedReader in;
